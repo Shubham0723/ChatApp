@@ -114,7 +114,9 @@ app.get('/profile', (req,res) => {
       }
     }
   });
-
+  app.post('/logout', (req,res) => {
+    res.cookie('token', '', {sameSite:'none', secure:true}).json('ok');
+  });
 
 const server = app.listen(4000);
 
@@ -140,6 +142,9 @@ wss.on('connection', (connection, req) => {
       console.log('dead');
     }, 1000);
   }, 5000);
+  connection.on('pong', () => {
+    clearTimeout(connection.deathTimer);
+  });
   const cookies = req.headers.cookie;
   if (cookies) {
     const tokenCookieString = cookies.split(';').find(str => str.startsWith('token'));
