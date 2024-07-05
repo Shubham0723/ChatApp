@@ -129,27 +129,48 @@ app.post("/login", async (req, res) => {
     }
   }
 });
-app.post("/logout", (req, res) => {
-  res.cookie("token", "", { sameSite: "none", secure: true }).json("ok");
+
+app.post("/logout", async (req, res) => {
+  const token = req.cookies?.token;
+  if (token) {
+    jwt.verify(token, jwtSecret, {}, (err, userData) => {
+      if (err) throw err;
+      const { userId } = userData;
+
+      // Notify and terminate the connection
+      [...wss.clients].forEach((client) => {
+        if (client.userId === userId) {
+          client.terminate();
+        }
+      });
+      notifyAboutOnlinePeople();
+
+      // Clear the token cookie
+      res.cookie("token", "", { sameSite: "none", secure: true }).json("ok");
+    });
+  } else {
+    res.status(401).json("no token");
+  }
 });
 
 const server = app.listen(4000);
 
 const wss = new ws.WebSocketServer({ server });
-wss.on("connection", (connection, req) => {
-  function notifyAboutOnlinePeople() {
-    [...wss.clients].forEach((client) => {
-      client.send(
-        JSON.stringify({
-          online: [...wss.clients].map((c) => ({
-            userId: c.userId,
-            username: c.username,
-          })),
-        })
-      );
-    });
-  }
+function notifyAboutOnlinePeople() {
+  const onlineUsers = [...wss.clients].map((client) => ({
+    userId: client.userId,
+    username: client.username,
+  })).filter(user => user.userId && user.username); // Filter out empty objects
 
+  [...wss.clients].forEach((client) => {
+    client.send(
+      JSON.stringify({
+        online: onlineUsers,
+      })
+    );
+  });
+}
+wss.on("connection", (connection, req) => {
   connection.isAlive = true;
 
   connection.timer = setInterval(() => {
@@ -162,9 +183,11 @@ wss.on("connection", (connection, req) => {
       console.log("dead");
     }, 1000);
   }, 5000);
+
   connection.on("pong", () => {
     clearTimeout(connection.deathTimer);
   });
+
   const cookies = req.headers.cookie;
   if (cookies) {
     const tokenCookieString = cookies
@@ -182,6 +205,7 @@ wss.on("connection", (connection, req) => {
       }
     }
   }
+
   connection.on("message", async (message) => {
     const messageData = JSON.parse(message.toString());
     const { recipient, text, file } = messageData;
@@ -190,11 +214,11 @@ wss.on("connection", (connection, req) => {
       console.log('size', file.data.length);
       const parts = file.name.split('.');
       const ext = parts[parts.length - 1];
-      filename = Date.now() + '.'+ext;
+      filename = Date.now() + '.' + ext;
       const path = __dirname + '/uploads/' + filename;
       const bufferData = new Buffer(file.data.split(',')[1], 'base64');
       fs.writeFile(path, bufferData, () => {
-        console.log('file saved:'+path);
+        console.log('file saved:' + path);
       });
     }
     if (recipient && (text || file)) {
@@ -220,5 +244,6 @@ wss.on("connection", (connection, req) => {
         );
     }
   });
+
   notifyAboutOnlinePeople();
 });
